@@ -1,104 +1,91 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import os
 from apscheduler.schedulers.background import BackgroundScheduler
-from sheduler import process_scheduled_emails # Import de votre fonction d'envoi
+from sheduler import process_scheduled_emails
 import atexit
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Auto-Mailer Pro", layout="centered")
+st.set_page_config(page_title="Auto-Mailer Pro", layout="wide")
 
-# --- INITIALISATION DU PLANIFICATEUR (SCHEDULER) ---
-# Cette fonction tourne en arrière-plan tant que l'app est lancée
-def start_scheduler():
-    scheduler = BackgroundScheduler(daemon=True)
-    # Vérifie les emails à envoyer toutes les 30 secondes
-    scheduler.add_job(
-        id='email_job',
-        func=process_scheduled_emails,
-        trigger='interval',
-        seconds=30,
-        replace_existing=True
-    )
-    if not scheduler.running:
-        scheduler.start()
-    return scheduler
-
-# On lance le scheduler une seule fois grâce au session_state
+# --- INITIALISATION DU SCHEDULER ---
 if 'scheduler_started' not in st.session_state:
-    start_scheduler()
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(id='email_job', func=process_scheduled_emails, trigger='interval', seconds=30)
+    scheduler.start()
     st.session_state['scheduler_started'] = True
+    atexit.register(lambda: scheduler.shutdown())
 
-# --- INTERFACE UTILISATEUR ---
-st.title("📧 Automatisation d'Envoi d'E-mails")
-st.markdown("Configurez vos envois programmés ci-dessous.")
+# --- FONCTIONS DE BASE DE DONNÉES ---
+def save_email(data):
+    conn = sqlite3.connect('emails.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO emails (sender_email, sender_password, recipient_emails, subject, body, files, scheduled_time, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+    ''', data)
+    conn.commit()
+    conn.close()
 
-# Barre latérale pour la sécurité (Optionnel mais recommandé)
+# --- INTERFACE ---
+st.title("🚀 Automatisation d'Envoi d'E-mails Professionnel")
+
 with st.sidebar:
-    st.header("Paramètres de connexion")
-    sender_email = st.text_input("Votre Email Gmail")
-    # Utilisation du Mot de passe d'application (16 caractères)
-    sender_password = st.text_input("Mot de passe d'application", type="password")
-    st.info("💡 Utilisez un 'Mot de passe d'application' Google, pas votre mot de passe habituel.")
-
-# Formulaire d'envoi
-with st.form("mail_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        recipient = st.text_input("Destinataire (Email)")
-    with col2:
-        subject = st.text_input("Objet du message")
+    st.header("🔐 Configuration de Sécurité")
+    master_key = st.text_input("Créez votre Clé Maître (pour cette session)", type="password", help="Cette clé protège vos accès.")
+    user_email = st.text_input("Votre Email Gmail")
+    app_password = st.text_input("Mot de passe d'application Google", type="password")
     
-    body = st.text_area("Corps du message")
-    
-    # Choix de la date et l'heure
-    d = st.date_input("Date d'envoi")
-    t = st.time_input("Heure d'envoi")
-    scheduled_time = f"{d} {t}"
+    if not master_key:
+        st.warning("⚠️ Définissez une clé maître pour activer le formulaire.")
 
-    submit = st.form_submit_button("Programmer l'envoi")
+# --- FORMULAIRE PRINCIPAL ---
+if master_key:
+    with st.container():
+        st.subheader("📝 Préparer un nouvel envoi")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            dest = st.text_input("Destinataire")
+            sujet = st.text_input("Objet")
+        with col2:
+            date_envoi = st.date_input("Date")
+            heure_envoi = st.time_input("Heure")
+        
+        message = st.text_area("Message", height=150)
+        uploaded_file = st.file_uploader("Joindre un fichier (Optionnel)", type=['pdf', 'docx', 'jpg', 'png'])
 
-# --- LOGIQUE DE SAUVEGARDE ---
-if submit:
-    if not sender_email or not sender_password:
-        st.error("Veuillez remplir vos identifiants dans la barre latérale.")
-    else:
-        try:
-            conn = sqlite3.connect('emails.db')
-            cursor = conn.cursor()
-            # Création de la table si elle n'existe pas (évite l'erreur 'no such table')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS emails (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender_email TEXT,
-                    sender_password TEXT,
-                    recipient_emails TEXT,
-                    subject TEXT,
-                    body TEXT,
-                    files TEXT,
-                    scheduled_time TEXT,
-                    status TEXT DEFAULT 'pending'
+        # --- LOGIQUE DE VALIDATION ET CONFIRMATION ---
+        if st.button("Programmer l'envoi"):
+            # 1. Vérification des champs vides
+            if not all([user_email, app_password, dest, sujet, message]):
+                st.error("❌ Erreur : Tous les champs obligatoires doivent être remplis.")
+            else:
+                # 2. Fenêtre de confirmation (Streamlit natif)
+                st.session_state.confirm_data = (
+                    user_email, app_password, dest, sujet, message, 
+                    uploaded_file.name if uploaded_file else None,
+                    f"{date_envoi} {heure_envoi}"
                 )
-            ''')
-            
-            cursor.execute('''
-                INSERT INTO emails (sender_email, sender_password, recipient_emails, subject, body, scheduled_time)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (sender_email, sender_password, recipient, subject, body, scheduled_time))
-            
-            conn.commit()
-            conn.close()
-            st.success(f"✅ E-mail programmé pour le {scheduled_time} !")
-        except Exception as e:
-            st.error(f"Erreur base de données : {e}")
+                st.warning("Veuillez confirmer les informations ci-dessous avant programmation.")
+                st.write(f"**Vers :** {dest} | **Sujet :** {sujet} | **Heure :** {date_envoi} {heure_envoi}")
+                
+                if st.button("✅ OUI, CONFIRMER LA PROGRAMMATION"):
+                    save_email(st.session_state.confirm_data)
+                    st.success("🎯 E-mail enregistré et mis en file d'attente !")
+                    if uploaded_file:
+                        # Sauvegarde locale du fichier pour le scheduler
+                        if not os.path.exists("attachments"): os.makedirs("attachments")
+                        with open(os.path.join("attachments", uploaded_file.name), "wb") as f:
+                            f.write(uploaded_file.getbuffer())
 
-# --- AFFICHAGE DES TÂCHES EN ATTENTE ---
+# --- AFFICHAGE ET GESTION ---
 st.divider()
-st.subheader("📋 Liste des envois programmés")
+st.subheader("📊 File d'attente des messages")
 try:
     conn = sqlite3.connect('emails.db')
-    df = pd.read_sql_query("SELECT recipient_emails, subject, scheduled_time, status FROM emails", conn)
-    st.table(df)
+    df = pd.read_sql_query("SELECT id, recipient_emails, subject, scheduled_time, status FROM emails", conn)
+    st.dataframe(df, use_container_width=True)
     conn.close()
 except:
-    st.write("Aucun envoi programmé pour le moment.")
+    st.info("La file d'attente est vide.")
