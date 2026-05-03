@@ -2,44 +2,38 @@ import smtplib
 from email.message import EmailMessage
 import os
 
-def send_email(sender, password, recipients, subject, body, files=None):
-    """Envoie un e-mail avec ou sans pièces jointes via SMTP."""
+# --- CONFIGURATION BREVO ---
+SMTP_SERVER = "smtp-relay.brevo.com"
+SMTP_PORT = 587
+SMTP_USER = "ton-email@exemple.com"  # Ton login Brevo
+SMTP_PASSWORD = "ta-cle-api-generee"  # Ta clé SMTP Brevo
+# ---------------------------
+
+def send_email(recipients, subject, body, files=None):
     msg = EmailMessage()
     msg['Subject'] = subject
-    msg['From'] = sender
+    msg['From'] = f"Mon Système <{SMTP_USER}>"
     msg['To'] = recipients
     msg.set_content(body)
 
+    # Gestion des pièces jointes
     if files:
-        # Les fichiers sont séparés par des virgules
-        file_list = files.split(',')
-        for file_path in file_list:
-            if os.path.exists(file_path):
-                with open(file_path, 'rb') as f:
-                    file_data = f.read()
-                    file_name = os.path.basename(file_path)
+        for path in files.split(','):
+            if os.path.exists(path):
+                with open(path, 'rb') as f:
                     msg.add_attachment(
-                        file_data, 
+                        f.read(), 
                         maintype='application', 
                         subtype='octet-stream', 
-                        filename=file_name
+                        filename=os.path.basename(path)
                     )
 
     try:
-        # Envoi via SMTP (Exemple pour un compte Gmail, utilisez le port 587 si nécessaire)
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender, password)
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls() # Sécurise la connexion
+            server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
         return True
     except Exception as e:
-        print(f"Erreur lors de l'envoi de l'e-mail : {e}")
+        print(f"Erreur Brevo : {e}")
         return False
-
-def notify_sender(sender, password, subject, original_recipient):
-    """Envoie une notification à l'expéditeur une fois le mail envoyé."""
-    notify_subject = f"Confirmation d'envoi : {subject}"
-    notify_body = (
-        f"Bonjour,\n\nVotre e-mail ayant pour objet '{subject}' "
-        f"destiné à {original_recipient} a été envoyé avec succès !"
-    )
-    send_email(sender, password, sender, notify_subject, notify_body)
