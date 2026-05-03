@@ -4,7 +4,7 @@ import pandas as pd
 import os
 #il faut toujours vérifier si il n'y a pas d'erreurs
 from apscheduler.schedulers.background import BackgroundScheduler
-from projet1.scheduler import process_scheduled_emails
+from scheduler import process_scheduled_emails
 import atexit
 
 st.set_page_config(page_title="Auto-Mailer Pro", layout="wide")
